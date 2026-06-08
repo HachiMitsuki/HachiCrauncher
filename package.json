@@ -1,13 +1,13 @@
 {
   "name": "hachicrauncher",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "productName": "HachiCrauncher",
   "description": "HachiCrauncher - Minecraft マルチサーバーランチャー (based on HeliosLauncher)",
   "author": "はちみつき",
   "license": "UNLICENSED",
-  "homepage": "https://github.com/MitSuKiKuStiM/HachiCrauncher",
+  "homepage": "https://github.com/HachiMitsuki/HachiCrauncher",
   "bugs": {
-    "url": "https://github.com/MitSuKiKuStiM/HachiCrauncher/issues"
+    "url": "https://github.com/HachiMitsuki/HachiCrauncher/issues"
   },
   "private": true,
   "main": "index.js",
@@ -47,6 +47,6 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MitSuKiKuStiM/HachiCrauncher.git"
+    "url": "git+https://github.com/HachiMitsuki/HachiCrauncher.git"
   }
 }

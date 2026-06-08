@@ -1,6 +1,8 @@
 name: Build
 
-on: push
+# 毎pushでの3OS自動ビルドは無効化（ローカルの dist:win --publish と競合・無駄を避けるため）。
+# 必要時に Actions タブから手動実行する。
+on: workflow_dispatch
 
 jobs:
   release:
