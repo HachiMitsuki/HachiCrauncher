@@ -95,11 +95,35 @@ class ProcessBuilder {
     }
 
     /**
+     * Apply the distributed `hachicrauncher-shared-config.zip` into the instance's
+     * config/ folder. "Baseline" behavior: only (re)extracts when the bundle changes
+     * (first launch, or the host pushed updated mod configs). Personal client configs
+     * (video/shaders/voice) are excluded from the bundle by the sync tool.
+     */
+    syncSharedConfig(){
+        try {
+            const zipFile = path.join(this.gameDir, 'hachicrauncher-shared-config.zip')
+            if(!fs.existsSync(zipFile)) return
+            const hash = crypto.createHash('md5').update(fs.readFileSync(zipFile)).digest('hex')
+            const markerFile = path.join(this.gameDir, '.hachicrauncher-config.json')
+            let marker = {}
+            try { marker = JSON.parse(fs.readFileSync(markerFile, 'utf8')) } catch(e) { /* first run */ }
+            if(marker.configHash === hash) return // unchanged -> keep player's configs
+            new AdmZip(zipFile).extractAllTo(path.join(this.gameDir, 'config'), true)
+            fs.writeFileSync(markerFile, JSON.stringify({ configHash: hash, appliedAt: new Date().toISOString() }))
+            logger.info('Applied shared mod configs from bundle')
+        } catch(err) {
+            logger.warn('Failed to apply shared config:', err)
+        }
+    }
+
+    /**
      * Convienence method to run the functions typically used to build a process.
      */
     build(){
         fs.ensureDirSync(this.gameDir)
         this.syncSharedOptions()
+        this.syncSharedConfig()
         const tempNativePath = path.join(os.tmpdir(), ConfigManager.getTempNativeFolder(), crypto.pseudoRandomBytes(16).toString('hex'))
         process.throwDeprecation = true
         this.setupLiteLoader()
