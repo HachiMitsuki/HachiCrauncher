@@ -118,12 +118,41 @@ class ProcessBuilder {
     }
 
     /**
+     * Remove mods from the instance's mods/ folder that are no longer in the
+     * distribution. Helios does not prune these on its own, so removed mods pile
+     * up and break server connections ("mod present on client, missing on server").
+     * Keeps the client modset matching what the distribution declares.
+     */
+    cleanStaleMods(){
+        try {
+            const modsDir = path.join(this.gameDir, 'mods')
+            if(!fs.existsSync(modsDir)) return
+            const expected = new Set()
+            for(const mdl of this.server.modules){
+                const raw = mdl.rawModule || {}
+                const p = (raw.artifact && raw.artifact.path) || ''
+                if(raw.type === Type.File && p.startsWith('mods/')) expected.add(p.slice(5))
+            }
+            if(expected.size === 0) return // safety: never wipe everything
+            for(const f of fs.readdirSync(modsDir)){
+                if(f.toLowerCase().endsWith('.jar') && !expected.has(f)){
+                    fs.removeSync(path.join(modsDir, f))
+                    logger.info('Removed stale mod not in distribution: ' + f)
+                }
+            }
+        } catch(err) {
+            logger.warn('cleanStaleMods failed:', err)
+        }
+    }
+
+    /**
      * Convienence method to run the functions typically used to build a process.
      */
     build(){
         fs.ensureDirSync(this.gameDir)
         this.syncSharedOptions()
         this.syncSharedConfig()
+        this.cleanStaleMods()
         const tempNativePath = path.join(os.tmpdir(), ConfigManager.getTempNativeFolder(), crypto.pseudoRandomBytes(16).toString('hex'))
         process.throwDeprecation = true
         this.setupLiteLoader()
