@@ -111,8 +111,8 @@ function escapeHtml(s){
 
 /**
  * PLAY の前に、選んでいる鯖の名簿に入っているかを受付口に聞く。
- * 名簿に無ければ申し込みの画面を出して false を返す（起動しない）。
- * 受付口が答えない・鯖からの名簿が古いときは、止めずに true を返す（今までどおり起動する）。
+ * 名簿に無ければ、受付口が自動で Discord の管理用チャンネルに知らせるので、その旨を出して false を返す（起動しない）。
+ * 受付口が答えない・鯖からの名簿が古い・知らない答えのときは、止めずに true を返す（今までどおり起動する）。
  *
  * @param {Object} server The selected distribution server.
  * @returns {Promise<boolean>} true to continue launching.
@@ -125,7 +125,7 @@ async function checkWhitelistBeforeLaunch(server){
     toggleLaunchArea(true)
     let res
     try {
-        res = await HachiApi.post('/v1/status')
+        res = await HachiApi.post(server, '/v1/status')
     } catch(err) {
         loggerLanding.warn('Whitelist check skipped.', err.message)
         res = null
@@ -134,64 +134,30 @@ async function checkWhitelistBeforeLaunch(server){
     if(res == null || res.state === 'listed' || res.fresh !== true){
         return true
     }
-    showWhitelistOverlay(server, res)
+    const message = whitelistMessage(server, res)
+    if(message == null){
+        return true
+    }
+    showWhitelistMessage(message[0], message[1])
     return false
 }
 
-function showWhitelistOverlay(server, res){
+function whitelistMessage(server, res){
     const serverName = escapeHtml(server.rawServer.name)
     const name = escapeHtml(res.name)
-    if(res.state === 'none'){
-        setOverlayContent(
-            `${serverName}の名簿にまだ入っていません`,
-            'はちみつきに参加を申し込めます。承認されたら、もう一度 PLAY を押してください。<br><br>'
-                + `Minecraft の名前: <b>${name}</b><br><br>`
-                + 'ひとこと（だれか分かるように・書かなくても大丈夫）<br>'
-                + '<input id="hachiApplyNote" type="text" maxlength="100" placeholder="例: Discord の ○○ です" '
-                + 'style="width:100%;box-sizing:border-box;margin-top:6px;padding:6px 8px;border-radius:4px;'
-                + 'border:1px solid rgba(255,255,255,0.4);background:rgba(0,0,0,0.35);color:#fff;font-size:13px;">',
-            '参加を申し込む',
-            'やめる'
-        )
-        // 日本語入力の変換を決める Enter で申し込みが送られないようにする
-        document.getElementById('hachiApplyNote').addEventListener('keydown', e => {
-            if(e.isComposing || e.keyCode === 229){
-                e.stopPropagation()
-            }
-        })
-        setOverlayHandler(async () => {
-            const button = document.getElementById('overlayAcknowledge')
-            const noteInput = document.getElementById('hachiApplyNote')
-            button.disabled = true
-            let result
-            try {
-                result = await HachiApi.post('/v1/apply', { note: noteInput != null ? noteInput.value : '' })
-            } catch(err) {
-                loggerLanding.warn('Whitelist apply failed.', err.message)
-                result = null
-            }
-            button.disabled = false
-            if(result == null){
-                showWhitelistMessage('今は申し込めませんでした',
-                    `少し待ってからもう一度試すか、Discord の DM ではちみつきに Minecraft の名前（<b>${name}</b>）を送ってください。`)
-                return
-            }
-            showWhitelistOverlay(server, result)
-        })
-        setDismissHandler(() => {
-            toggleOverlay(false)
-        })
-        toggleOverlay(true, true)
-        return
-    }
+    const again = '承認されたら、もう一度 PLAY を押してください（ランチャーは閉じても大丈夫です）。'
+    const dm = `Discord の DM ではちみつきに Minecraft の名前（<b>${name}</b>）を送ってください。`
     const messages = {
-        listed: ['名簿に入っています', 'もう一度 PLAY を押すと、そのまま鯖に入れます。'],
-        pending: ['申し込み済みです', 'はちみつきの承認待ちです。ランチャーを閉じても大丈夫です。承認されたら、もう一度 PLAY を押してください。'],
+        notified: [`${serverName}の名簿にまだ入っていません`,
+            `はちみつきに「<b>${name}</b> が入ろうとしています」と知らせました。${again}`],
+        pending: ['はちみつきの承認待ちです', `<b>${name}</b> のことは、もう知らせてあります。${again}`],
         approved: ['承認されました', '鯖の名簿に入るまで 1 分ほどかかります。少し待ってから、もう一度 PLAY を押してください。'],
-        rejected: ['今回は参加できませんでした', 'くわしくは、Discord の DM ではちみつきに聞いてください。']
+        rejected: ['今回は参加できませんでした', 'くわしくは、Discord の DM ではちみつきに聞いてください。'],
+        failed: ['名簿に入れられませんでした', `Minecraft の名前が見つからなかったかもしれません。${dm}`],
+        busy: ['今は知らせを送れませんでした', `少し時間をおいてから、もう一度 PLAY を押すか、${dm}`],
+        notify_failed: ['今は知らせを送れませんでした', `少し時間をおいてから、もう一度 PLAY を押すか、${dm}`]
     }
-    const [title, desc] = messages[res.state] || ['名簿を確かめられませんでした', 'もう一度 PLAY を押してください。']
-    showWhitelistMessage(title, desc)
+    return messages[res.state] || null
 }
 
 function showWhitelistMessage(title, desc){
