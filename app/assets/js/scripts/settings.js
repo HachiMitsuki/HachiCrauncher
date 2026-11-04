@@ -860,15 +860,33 @@ async function resolveDropinModsForUI(){
     CACHE_SETTINGS_MODS_DIR = path.join(ConfigManager.getInstanceDirectory(), serv.rawServer.id, 'mods')
     CACHE_DROPIN_MODS = DropinModUtil.scanForDropinMods(CACHE_SETTINGS_MODS_DIR, serv.rawServer.minecraftVersion)
 
+    // HachiCrauncher: distributed mods also live in mods/, so list only the player's own
+    // and mark the ones the host has tried on this server.
+    const userModsCfg = serv.rawServer.hachiUserMods
+    const checkedIds = new Set()
+    if(userModsCfg != null){
+        const shipped = UserMods.getDistributedModFiles(serv)
+        CACHE_DROPIN_MODS = CACHE_DROPIN_MODS.filter(d => !shipped.has(d.name))
+        for(const c of userModsCfg.checked || []) checkedIds.add(c.modId)
+    }
+    renderCheckedModsForUI(userModsCfg)
+
     let dropinMods = ''
 
     for(dropin of CACHE_DROPIN_MODS){
+        let checkedTag = ''
+        if(checkedIds.size > 0){
+            const ids = UserMods.readJarModIds(path.join(CACHE_SETTINGS_MODS_DIR, dropin.fullName)) || []
+            if(ids.some(id => checkedIds.has(id))){
+                checkedTag = ` <span class="settingsModVersion">${Lang.queryJS('settings.dropinMods.checkedLabel')}</span>`
+            }
+        }
         dropinMods += `<div id="${dropin.fullName}" class="settingsBaseMod settingsDropinMod" ${!dropin.disabled ? 'enabled' : ''}>
                     <div class="settingsModContent">
                         <div class="settingsModMainWrapper">
                             <div class="settingsModStatus"></div>
                             <div class="settingsModDetails">
-                                <span class="settingsModName">${dropin.name}</span>
+                                <span class="settingsModName">${dropin.name}${checkedTag}</span>
                                 <div class="settingsDropinRemoveWrapper">
                                     <button class="settingsDropinRemoveButton" remmod="${dropin.fullName}">${Lang.queryJS('settings.dropinMods.removeButton')}</button>
                                 </div>
@@ -883,6 +901,26 @@ async function resolveDropinModsForUI(){
     }
 
     document.getElementById('settingsDropinModsContent').innerHTML = dropinMods
+}
+
+/**
+ * Show the mods the host has tried on the selected server, with their download pages.
+ *
+ * @param {Object | undefined} userModsCfg The server's `hachiUserMods` entry.
+ */
+function renderCheckedModsForUI(userModsCfg){
+    const container = document.getElementById('settingsCheckedModsContainer')
+    const checked = (userModsCfg && userModsCfg.checked) || []
+    if(checked.length === 0){
+        container.style.display = 'none'
+        return
+    }
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' })[c])
+    document.getElementById('settingsCheckedModsContent').innerHTML = checked.map(c => {
+        const link = /^https:\/\//.test(c.url || '') ? ` <a href="${esc(c.url)}">${esc(c.url)}</a>` : ''
+        return `<div class="settingsCheckedMod"><span class="settingsModName">${esc(c.name)}</span> <span class="settingsModVersion">${esc(c.note)}</span>${link}</div>`
+    }).join('')
+    container.style.display = ''
 }
 
 /**

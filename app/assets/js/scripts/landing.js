@@ -29,6 +29,7 @@ const {
 
 // Internal Requirements
 const DiscordWrapper          = require('./assets/js/discordwrapper')
+const UserMods                = require('./assets/js/usermods') // also used by settings.js
 const ProcessBuilder          = require('./assets/js/processbuilder')
 
 // Launch Elements
@@ -683,7 +684,17 @@ async function dlAsync(login = true) {
             proc.stdout.on('data', tempListener)
             proc.stderr.on('data', gameErrorListener)
 
-            setLaunchDetails(Lang.queryJS('landing.dlAsync.doneEnjoyServer'))
+            // Player-added mods: tell the host about suspicious ones (in the background),
+            // and say so when a duplicate of a distributed mod was set aside.
+            const modsReport = pb.userModsReport
+            if(modsReport != null){
+                UserMods.reportSuspicious(pb.gameDir, serv, modsReport, authUser.displayName, remote.app.getVersion())
+            }
+            if(modsReport != null && modsReport.moved.length > 0){
+                setLaunchDetails(Lang.queryJS('landing.dlAsync.movedUserMods', { count: modsReport.moved.length, dir: UserMods.REMOVED_DIR }))
+            } else {
+                setLaunchDetails(Lang.queryJS('landing.dlAsync.doneEnjoyServer'))
+            }
 
             // Init Discord Hook
             if(distro.rawDistribution.discord != null && serv.rawServer.discord != null){

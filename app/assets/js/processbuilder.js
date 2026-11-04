@@ -9,6 +9,7 @@ const os                    = require('os')
 const path                  = require('path')
 
 const ConfigManager            = require('./configmanager')
+const UserMods                 = require('./usermods')
 
 const logger = LoggerUtil.getLogger('ProcessBuilder')
 
@@ -121,27 +122,15 @@ class ProcessBuilder {
      * Remove mods from the instance's mods/ folder that are no longer in the
      * distribution. Helios does not prune these on its own, so removed mods pile
      * up and break server connections ("mod present on client, missing on server").
-     * Keeps the client modset matching what the distribution declares.
+     * Servers with `hachiUserMods` keep the mods players add themselves (see usermods.js).
+     * The result is kept on `this.userModsReport` for the launch screen.
      */
     cleanStaleMods(){
         try {
-            const modsDir = path.join(this.gameDir, 'mods')
-            if(!fs.existsSync(modsDir)) return
-            const expected = new Set()
-            for(const mdl of this.server.modules){
-                const raw = mdl.rawModule || {}
-                const p = (raw.artifact && raw.artifact.path) || ''
-                if(raw.type === Type.File && p.startsWith('mods/')) expected.add(p.slice(5))
-            }
-            if(expected.size === 0) return // safety: never wipe everything
-            for(const f of fs.readdirSync(modsDir)){
-                if(f.toLowerCase().endsWith('.jar') && !expected.has(f)){
-                    fs.removeSync(path.join(modsDir, f))
-                    logger.info('Removed stale mod not in distribution: ' + f)
-                }
-            }
+            this.userModsReport = UserMods.syncModsFolder(this.gameDir, this.server)
         } catch(err) {
             logger.warn('cleanStaleMods failed:', err)
+            this.userModsReport = { deleted: [], moved: [], kept: [] }
         }
     }
 

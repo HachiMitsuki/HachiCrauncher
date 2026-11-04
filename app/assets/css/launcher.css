@@ -1826,6 +1826,28 @@ input:checked + .toggleSwitchSlider:before {
     pointer-events: none;
 }
 
+/* Mods the host has tried on the selected server (HachiCrauncher). */
+#settingsCheckedModsContainer {
+    margin-top: 15px;
+}
+.settingsCheckedModsHeader {
+    font-size: 12px;
+    padding-bottom: 6px;
+}
+#settingsCheckedModsContent {
+    font-size: 12px;
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 3px;
+    color: white;
+}
+.settingsCheckedMod {
+    padding: 8px 10px;
+}
+.settingsCheckedMod a {
+    color: #a8d8ff;
+    font-size: 10px;
+}
+
 /* Button to remove drop-in mods. */
 .settingsDropinRemoveButton {
     background: none;

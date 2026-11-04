@@ -14,6 +14,16 @@ mediaDiscordURL = "#"
 sourceGithubLink = "https://github.com/HachiMitsuki/HachiCrauncher"
 supportLink = "https://github.com/HachiMitsuki/HachiCrauncher/issues"
 
+dropinMods = "自分で足した MOD"
+addMods = "MOD のフォルダを開く（.jar をここへドラッグしても入ります）"
+checkedModsHeader = "はちみつきが確かめた MOD（Create鯖で使えることを確認済み）"
+
+[js.settings.dropinMods]
+checkedLabel = "確かめ済み"
+
+[js.landing.dlAsync]
+movedUserMods = "{count} 個の MOD を「{dir}」フォルダへ移しました（配っている MOD と同じ物の別の版のため）。そのまま起動します"
+
 [ejs.welcome]
 welcomeHeader = "ハチクランチャーへようこそ"
 welcomeDescription = "MODのインストールも、Javaの設定も、サーバーごとのプロファイルも全部おまかせ。入りたいサーバーを選ぶだけで、必要なMODが自動で同期されます。"
