@@ -8,7 +8,8 @@
  *   - jars that declare the same mod id as a distributed mod are moved to
  *     `外したMOD/` (two copies of one mod stop the game from starting),
  *   - everything else is kept. Kept jars that match the `suspicious` rules are
- *     reported to the host's Discord channel through its webhook.
+ *     reported to the host through the HachiCrauncher API (`/v1/report`, see
+ *     hachiapi.js), which posts them to the host's Discord channel.
  * A server without `hachiUserMods` keeps the v1.0.9 behaviour: every jar that
  * is not in the distribution is deleted.
  *
@@ -16,26 +17,29 @@
  *   distributedModIds: ['create', ...],              // ids found in the distributed jars
  *   checked: [{ modId, name, note, url }],           // mods the host has tried on this server
  *   suspicious: [{ label, level, modIds, keywords, except }],
- *   reportWebhook: '<base64>'                        // Discord webhook URL, base64 ('' = off)
+ *   report: true                                     // report suspicious mods to the host (absent/false = off)
  * }
- * The webhook is base64-encoded only so that bots scraping public pages for
- * webhook URLs do not pick it up; anyone reading the distribution can decode it.
+ * Up to v1.1.1 the distribution carried a Discord webhook URL (`reportWebhook`)
+ * and the launcher posted to it directly. Anyone reading the public distribution
+ * could take that URL, so since v1.1.2 the launcher only talks to the API and the
+ * Discord credentials stay on the API side. `reportWebhook` is ignored.
  */
 const AdmZip          = require('adm-zip')
 const crypto          = require('crypto')
 const fs              = require('fs-extra')
-const got             = require('got')
 const { LoggerUtil }  = require('helios-core')
 const { Type }        = require('helios-distribution-types')
 const path            = require('path')
+
+const HachiApi        = require('./hachiapi')
 
 const logger = LoggerUtil.getLogger('UserMods')
 
 const MARKER_FILE = '.hachicrauncher-mods.json'
 const REMOVED_DIR = '外したMOD'
-const REPORT_TIMEOUT_MS = 5000
-const WEBHOOK_PREFIX = /^https:\/\/(discord|discordapp)\.com\/api\/webhooks\/\d+\/[\w-]+$/
-const STRONG_LEVEL = 'ずる'
+const REPORT_KIND = 'suspicious-mods'
+const REPORT_MAX_MODS = 10
+const REPORT_MAX_JSON = 3800 // the API refuses payloads over 4000 characters
 
 exports.REMOVED_DIR = REMOVED_DIR
 
@@ -183,53 +187,46 @@ exports.syncModsFolder = function(gameDir, server){
 }
 
 /**
- * Decode the server's Discord webhook, or null when reporting is off or the
- * value is not a Discord webhook URL.
+ * Whether this server wants suspicious mods reported to the host.
  *
  * @param {Object | undefined} cfg The server's `hachiUserMods` entry.
- * @returns {string | null}
+ * @returns {boolean}
  */
-exports.getReportWebhook = function(cfg){
-    if(cfg == null || !cfg.reportWebhook) return null
-    const url = Buffer.from(String(cfg.reportWebhook), 'base64').toString('utf8').trim()
-    return WEBHOOK_PREFIX.test(url) ? url : null
+exports.isReportEnabled = function(cfg){
+    return cfg != null && cfg.report === true
 }
 
-// Strip characters that Discord treats as formatting or mentions, and cap the length.
-const clean = (s, max) => String(s == null ? '' : s).replace(/[`*_~|<>@#\\\r\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max)
+// Cap the length of a value that came from the player's PC. The API removes
+// Discord formatting and mentions before posting.
+const cap = (s, max) => String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, max)
 
 /**
- * Build the Discord webhook message for a player's suspicious mods.
+ * Build the `/v1/report` payload for a player's suspicious mods. The JSON is
+ * kept under the API's size limit by dropping mods from the end; `total` still
+ * tells how many there were.
  *
- * @param {string} playerName The Minecraft name of the player.
- * @param {string} serverName The server's display name.
  * @param {string} launcherVersion The launcher's version.
  * @param {Array.<{file: string, modIds: Array.<string>, reasons: Array.<{label: string, level: string}>}>} mods
- * @returns {Object} The webhook payload.
+ * @returns {{launcher: string, total: number, mods: Array.<Object>}}
  */
-exports.buildDiscordMessage = function(playerName, serverName, launcherVersion, mods){
-    const strong = mods.some(m => m.reasons.some(r => r.level === STRONG_LEVEL))
-    const lines = mods.slice(0, 10).map(m => {
-        const why = m.reasons.map(r => `【${clean(r.level, 10)}】${clean(r.label, 60)}`).join(' / ')
-        const ids = m.modIds.length ? `（ID: ${m.modIds.slice(0, 5).map(i => clean(i, 40)).join(', ')}）` : ''
-        return `・${clean(m.file, 100)}${ids}\n　${why}`
-    })
-    return {
-        username: 'ハチクランチャー',
-        allowed_mentions: { parse: [] },
-        embeds: [{
-            title: `${strong ? '⚠ ' : ''}${clean(playerName, 16)} さんが怪しい MOD を入れています`,
-            description: lines.join('\n').slice(0, 3800),
-            color: strong ? 0xd9534f : 0xf0ad4e,
-            footer: { text: `${clean(serverName, 40)} ・ ランチャー v${clean(launcherVersion, 20)} ・ 消してはいません（本人の PC に残っています）` }
-        }]
+exports.buildReportPayload = function(launcherVersion, mods){
+    const list = mods.slice(0, REPORT_MAX_MODS).map(m => ({
+        file: cap(m.file, 100),
+        modIds: m.modIds.slice(0, 5).map(i => cap(i, 40)),
+        reasons: m.reasons.slice(0, 5).map(r => ({ level: cap(r.level, 10), label: cap(r.label, 60) }))
+    }))
+    const payload = { launcher: cap(launcherVersion, 20), total: mods.length, mods: list }
+    while(payload.mods.length > 1 && JSON.stringify(payload).length > REPORT_MAX_JSON){
+        payload.mods.pop()
     }
+    return payload
 }
 
 /**
- * Tell the host's Discord channel which suspicious mods this player has.
- * Sent only when that list changed since the last successful report, so a
- * player is not reported on every launch. Never throws and never blocks the launch.
+ * Tell the host which suspicious mods this player has, through the
+ * HachiCrauncher API. Sent only when that list changed since the last report
+ * the API delivered to Discord, so a player is not reported on every launch.
+ * Never throws and never blocks the launch.
  *
  * @param {string} gameDir The server's instance directory.
  * @param {Object} server The distribution server object.
@@ -240,8 +237,7 @@ exports.buildDiscordMessage = function(playerName, serverName, launcherVersion, 
 exports.reportSuspicious = async function(gameDir, server, report, playerName, launcherVersion){
     try {
         const cfg = server.rawServer.hachiUserMods
-        const webhook = exports.getReportWebhook(cfg)
-        if(webhook == null) return
+        if(!exports.isReportEnabled(cfg)) return
         const mods = report.kept
             .filter(k => k.suspicious.length > 0)
             .map(k => ({ file: k.file, modIds: k.ids || [], reasons: k.suspicious }))
@@ -256,12 +252,16 @@ exports.reportSuspicious = async function(gameDir, server, report, playerName, l
         const hash = crypto.createHash('md5').update(JSON.stringify([playerName, mods])).digest('hex')
         if(marker.reportedHash === hash) return
 
-        // got (Node's HTTP) rather than the page's fetch, which is subject to CORS.
-        await got.post(webhook, {
-            json: exports.buildDiscordMessage(playerName, server.rawServer.name, launcherVersion, mods),
-            timeout: REPORT_TIMEOUT_MS,
-            retry: 0
+        // HachiApi.post sends the selected account's name and throws on HTTP errors
+        // (429 = reported too recently; the next launch tries again).
+        const res = await HachiApi.post(server, '/v1/report', {
+            kind: REPORT_KIND,
+            payload: exports.buildReportPayload(launcherVersion, mods)
         })
+        if(res == null || res.delivered !== true){
+            logger.warn('The API took the report but could not post it to Discord; will try again next launch')
+            return
+        }
         marker.reportedHash = hash
         writeMarker(gameDir, marker)
         logger.info(`Reported ${mods.length} suspicious mod(s) to the host`)
